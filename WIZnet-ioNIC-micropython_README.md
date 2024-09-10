@@ -64,3 +64,6 @@ cp build-W55RP20_EVB_PICO/firmware.uf2 /media/[user name]/RPI-RP2
 ```sh
 WIZnet-ioNIC-micropython/WIZnet-ioNIC_examples
 ```
+
+The pre-built bin files (WIZnet-ioNIC-micropython_Bin.zip) can be found at the following path:  
+https://github.com/WIZnet-ioNIC/WIZnet-ioNIC-micropython/releases  
