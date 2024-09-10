@@ -42,9 +42,7 @@ The W55RP20 has internal connections between the RP2040 and W5500 via GPIO pins.
 1. Clone  
 ```sh
 cd [user path]
-
 git clone https://github.com/WIZnet-ioNIC/WIZnet-ioNIC-micropython.git
-
 git submodule update --init
 ```
 
