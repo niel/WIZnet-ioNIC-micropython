@@ -67,3 +67,9 @@ WIZnet-ioNIC-micropython/WIZnet-ioNIC_examples
 
 The pre-built bin files (WIZnet-ioNIC-micropython_Bin.zip) can be found at the following path:  
 https://github.com/WIZnet-ioNIC/WIZnet-ioNIC-micropython/releases  
+
+For the guide document that includes the video, please refer to the link below.
+https://maker.wiznet.io/mason/projects/how%2Dto%2Dbuild%2Dwiznet%2Dionic%2Dmicropython/
+
+
+
