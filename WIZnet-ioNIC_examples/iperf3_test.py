@@ -4,7 +4,6 @@ import socket
 import struct
 import sys
 import time
-import threading
 from random import randint
 
 
@@ -46,32 +45,39 @@ class Stats:
         self.running = True
         self.t0 = self.t1 = time.time()
         self.nb0 = self.nb1 = 0  # num bytes
+        print("Stats collection started.")
 
     def add_bytes(self, n):
         if not self.running:
             return
         self.nb0 += n
         self.nb1 += n
+        print(f"add_bytes called: nb0={self.nb0}, nb1={self.nb1}")
 
     def update(self, final=False):
         if not self.running:
+            print("update called but stats collection is not running.")
             return
         t2 = time.time()
         dt = t2 - self.t1
         if final or dt > self.pacing_timer_us / 1e6:
             ta = self.t1 - self.t0
             tb = t2 - self.t0
-            print(f" {ta:.2f}-{tb:.2f} sec  {self.nb1 / 1024:.2f} KBytes")
+            print(f"Update: {ta:.2f}-{tb:.2f} sec  {self.nb1 / 1024:.2f} KBytes")
             self.t1 = t2
             self.nb1 = 0
+        else:
+            print(f"Update called but not enough time has passed (dt: {dt:.2f} sec)")
 
     def stop(self):
+        print("Stopping stats collection.")
         self.update(True)
         self.running = False
         t3 = time.time()
         dt = t3 - self.t0
         print("- " * 30)
         print(f"0.00-{dt:.2f} sec  {self.nb0 / 1024:.2f} KBytes  sender")
+        print("Stats collection stopped.")
 
 
 def client(host, port=5201, udp=False, reverse=False, bandwidth=10 * 1024 * 1024):
@@ -99,76 +105,118 @@ def client(host, port=5201, udp=False, reverse=False, bandwidth=10 * 1024 * 1024
         param["reverse"] = True
 
     # Connect to server
-    ai = socket.getaddrinfo(host, port)[0]
-    print("Connecting to", ai[-1])
-    print(f"ai={ai}")
-    s_ctrl = socket.socket(ai[0], socket.SOCK_STREAM)
-    s_ctrl.connect(ai[-1])
+    print(f"Connecting to {(host, port)}")
+    s_ctrl = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s_ctrl.connect((host, port))
+    except socket.error as e:
+        print(f"Failed to connect to server: {e}")
+        return
+
+    print("Connected to server.")
 
     # Send our cookie
     cookie = make_cookie()
-    s_ctrl.sendall(cookie)
+    try:
+        s_ctrl.sendall(cookie)
+    except socket.error as e:
+        print(f"Failed to send cookie: {e}")
+        return
+
+    print("Cookie sent.", cookie)
 
     # Object to gather statistics about the run
     stats = Stats(param)
 
     # Run the main loop, waiting for incoming commands and data
-    poll = select.poll()
-    poll.register(s_ctrl, select.POLLIN)
+    poll = select.select
     buf = None
     s_data = None
     start = None
 
     while True:
-        for pollable in poll.poll(1000):
-            if pollable[0] == s_ctrl.fileno():
+        try:
+            readable, _, _ = poll([s_ctrl], [], [], 1.0)
+        except socket.error as e:
+            print(f"Polling error: {e}")
+            return
+
+        for s in readable:
+            if s == s_ctrl:
                 # Receive command
-                cmd = s_ctrl.recv(1)[0]
-                if cmd == TEST_START:
+                try:
+                    cmd = s_ctrl.recv(1)
+                except socket.error as e:
+                    print(f"Failed to receive command: {e}")
+                    return
+
+                if not cmd:
+                    print("Connection closed by server.")
+                    return
+                cmd = cmd[0]
+                print(f"Received command: {cmd}")
+                if cmd == PARAM_EXCHANGE:
+                    param_j = json.dumps(param)
+                    try:
+                        s_ctrl.sendall(struct.pack(">I", len(param_j)))
+                        s_ctrl.sendall(bytes(param_j, "ascii"))
+                    except socket.error as e:
+                        print(f"Failed to exchange parameters: {e}")
+                        return
+                    print(
+                        f"Parameters exchanged. param_j={param_j}, len=({len(param_j)})"
+                    )
+                elif cmd == CREATE_STREAMS:
+                    if udp:
+                        s_data = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                        try:
+                            s_data.sendto(struct.pack("<I", 123456789), (host, port))
+                            s_data.recv(4)
+                        except socket.error as e:
+                            print(f"Failed to create UDP stream: {e}")
+                            return
+                        print("UDP data stream created.")
+                    else:
+                        s_data = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        try:
+                            s_data.connect((host, port))
+                            s_data.sendall(cookie)
+                        except socket.error as e:
+                            print(f"Failed to create TCP stream: {e}")
+                            return
+                        print("TCP data stream created.")
+                    buf = bytearray(urandom(param["len"]))
+                elif cmd == TEST_START:
                     if reverse:
                         # Start receiving data now, because data socket is open
                         if s_data:
-                            poll.register(s_data, select.POLLIN)
                             start = time.time()
                             stats.start()
+                            print("Started receiving data (reverse mode).")
                 elif cmd == TEST_RUNNING:
                     if not reverse:
                         # Start sending data now, ensure s_data is initialized
                         if s_data:
-                            poll.register(s_data, select.POLLOUT)
                             start = time.time()
                             stats.start()
-                elif cmd == PARAM_EXCHANGE:
-                    param_j = json.dumps(param)
-                    s_ctrl.sendall(struct.pack(">I", len(param_j)))
-                    s_ctrl.sendall(bytes(param_j, "ascii"))
-                elif cmd == CREATE_STREAMS:
-                    if udp:
-                        s_data = socket.socket(ai[0], socket.SOCK_DGRAM)
-                        print(f'data={struct.pack("<I", 123456789)}')
-                        s_data.sendto(struct.pack("<I", 123456789), ai[-1])
-                        s_data.recv(4)
-                    else:
-                        s_data = socket.socket(ai[0], socket.SOCK_STREAM)
-                        s_data.connect(ai[-1])
-                        s_data.sendall(cookie)
-                    buf = bytearray(urandom(param["len"]))
-                elif cmd == TEST_RUNNING and s_data:
-                    if not reverse:
-                        # Start sending data
-                        stats.start()
-                        while stats.running:
-                            try:
-                                n = s_data.send(buf)
-                                if n == 0:
-                                    break
-                                stats.add_bytes(n)
-                                print(f"stats={stats}")
-                            except socket.error as e:
-                                if e.errno != 11:  # Resource temporarily unavailable
-                                    stats.stop()
-                                    break
-                                time.sleep(0.01)  # Avoid busy loop
+                            print("Started sending data.")
+                            while stats.running:
+                                try:
+                                    n = s_data.send(buf)
+                                    if n == 0:
+                                        print("No data sent, breaking loop.")
+                                        break
+                                    stats.add_bytes(n)
+                                    print(f"Sent {n} bytes. stats={stats.__dict__}")
+                                    stats.update()
+                                except socket.error as e:
+                                    if (
+                                        e.errno != 11
+                                    ):  # Resource temporarily unavailable
+                                        stats.stop()
+                                        print(f"Socket error during send: {e}")
+                                        break
+                                    time.sleep(0.01)  # Avoid busy loop
                     else:
                         # Start receiving data
                         stats.start()
@@ -177,16 +225,19 @@ def client(host, port=5201, udp=False, reverse=False, bandwidth=10 * 1024 * 1024
                                 n = s_data.recv_into(buf)
                                 if n == 0:
                                     stats.stop()
+                                    print("Connection closed by peer.")
                                     break  # Connection closed
                                 stats.add_bytes(n)
+                                print(f"Received {n} bytes. stats={stats.__dict__}")
+                                stats.update()
                             except socket.error as e:
                                 if e.errno != 11:  # Resource temporarily unavailable
                                     stats.stop()
+                                    print(f"Socket error during receive: {e}")
                                     break
                                 time.sleep(0.01)  # Avoid busy loop
                 elif cmd == EXCHANGE_RESULTS:
                     if s_data:
-                        poll.unregister(s_data)
                         s_data.close()
                         s_data = None
 
@@ -196,7 +247,6 @@ def client(host, port=5201, udp=False, reverse=False, bandwidth=10 * 1024 * 1024
                         "cpu_util_system": 0.5,
                         "sender_has_retransmits": 1,
                         "congestion_used": "cubic",
-                        "text": "Hi",
                         "streams": [
                             {
                                 "id": 1,
@@ -211,13 +261,21 @@ def client(host, port=5201, udp=False, reverse=False, bandwidth=10 * 1024 * 1024
                         ],
                     }
                     results = json.dumps(results)
+                    try:
+                        s_ctrl.sendall(struct.pack(">I", len(results)))
+                        s_ctrl.sendall(bytes(results, "ascii"))
+                    except socket.error as e:
+                        print(f"Failed to send results: {e}")
+                        return
                     print(f"results={results}")
-                    s_ctrl.sendall(struct.pack(">I", len(results)))
-                    s_ctrl.sendall(bytes(results, "ascii"))
 
                 elif cmd == DISPLAY_RESULTS:
-                    s_ctrl.sendall(bytes([IPERF_DONE]))
-                    s_ctrl.close()
+                    try:
+                        s_ctrl.sendall(bytes([IPERF_DONE]))
+                        s_ctrl.close()
+                    except socket.error as e:
+                        print(f"Failed to send IPERF_DONE: {e}")
+                    print("Test completed, connection closed.")
                     time.sleep(1)
                     return
 
