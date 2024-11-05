@@ -31,3 +31,6 @@ user.props
 # vim temporary files
 .*.sw[a-p]
 *~
+
+# notepad plus files
+nppBackup/
