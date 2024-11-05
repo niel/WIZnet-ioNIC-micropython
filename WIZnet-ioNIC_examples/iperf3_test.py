@@ -1,3 +1,14 @@
+"""
+Pure Python, iperf3-compatible network performance test tool.
+
+MIT license; Copyright (c) 2018-2019 Damien P. George
+
+Supported modes: server & client, TCP & UDP, normal & reverse
+modified to Windows: Joseph<joseph@wiznet.io>
+
+This source is testing iperf3 on W55RP20 host from Windows Guest or compatible.
+"""
+
 import json
 import select
 import socket
@@ -5,6 +16,8 @@ import struct
 import sys
 import time
 from random import randint
+
+DEBUG = False
 
 
 # Provide a urandom() function for generating random bytes
@@ -36,7 +49,9 @@ def make_cookie():
 
 class Stats:
     def __init__(self, param):
-        self.pacing_timer_us = param["pacing_timer"] * 1000
+        self.pacing_timer_us = (
+            param["pacing_timer"] * 500
+        )  # 기존의 절반으로 조정하여 업데이트 주기 증가
         self.udp = param.get("udp", False)
         self.reverse = param.get("reverse", False)
         self.running = False
@@ -52,11 +67,16 @@ class Stats:
             return
         self.nb0 += n
         self.nb1 += n
-        print(f"add_bytes called: nb0={self.nb0}, nb1={self.nb1}")
+        if DEBUG:
+            print(f"add_bytes called: nb0={self.nb0}, nb1={self.nb1}")
+        # 충분한 데이터가 수집된 경우에만 update 호출
+        if self.nb1 >= self.pacing_timer_us / 1e6:
+            self.update()
 
     def update(self, final=False):
         if not self.running:
-            print("update called but stats collection is not running.")
+            if DEBUG:
+                print("update called but stats collection is not running.")
             return
         t2 = time.time()
         dt = t2 - self.t1
@@ -66,7 +86,7 @@ class Stats:
             print(f"Update: {ta:.2f}-{tb:.2f} sec  {self.nb1 / 1024:.2f} KBytes")
             self.t1 = t2
             self.nb1 = 0
-        else:
+        elif DEBUG:
             print(f"Update called but not enough time has passed (dt: {dt:.2f} sec)")
 
     def stop(self):
@@ -99,7 +119,7 @@ def client(host, port=5201, udp=False, reverse=False, bandwidth=10 * 1024 * 1024
         param["bandwidth"] = bandwidth
     else:
         param["tcp"] = True
-        param["len"] = 3000
+        param["len"] = 1500  # 기존의 3000에서 줄여 네트워크 안정성 향상
 
     if reverse:
         param["reverse"] = True
@@ -107,11 +127,23 @@ def client(host, port=5201, udp=False, reverse=False, bandwidth=10 * 1024 * 1024
     # Connect to server
     print(f"Connecting to {(host, port)}")
     s_ctrl = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    try:
-        s_ctrl.connect((host, port))
-    except socket.error as e:
-        print(f"Failed to connect to server: {e}")
-        return
+    s_ctrl.setsockopt(
+        socket.SOL_SOCKET, socket.SO_RCVBUF, 4 * 1024 * 1024
+    )  # 수신 버퍼 크기 증가
+    s_ctrl.setsockopt(
+        socket.SOL_SOCKET, socket.SO_SNDBUF, 4 * 1024 * 1024
+    )  # 송신 버퍼 크기 증가
+    s_ctrl.settimeout(30)  # 타임아웃 설정 (30초)
+    max_retries = 5
+    for attempt in range(max_retries):
+        try:
+            s_ctrl.connect((host, port))
+            break
+        except socket.error as e:
+            print(f"Attempt {attempt + 1} failed to connect: {e}")
+            if attempt == max_retries - 1:
+                return  # 모든 재시도가 실패한 경우 종료
+            time.sleep(5)  # 재시도 전에 5초 대기
 
     print("Connected to server.")
 
@@ -178,6 +210,15 @@ def client(host, port=5201, udp=False, reverse=False, bandwidth=10 * 1024 * 1024
                         print("UDP data stream created.")
                     else:
                         s_data = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        s_data.setsockopt(
+                            socket.SOL_SOCKET, socket.SO_RCVBUF, 4 * 1024 * 1024
+                        )  # 수신 버퍼 크기 증가
+                        s_data.setsockopt(
+                            socket.SOL_SOCKET, socket.SO_SNDBUF, 4 * 1024 * 1024
+                        )  # 송신 버퍼 크기 증가
+                        s_data.setsockopt(
+                            socket.IPPROTO_TCP, socket.TCP_NODELAY, 1
+                        )  # 네이글 알고리즘 비활성화
                         try:
                             s_data.connect((host, port))
                             s_data.sendall(cookie)
@@ -207,8 +248,9 @@ def client(host, port=5201, udp=False, reverse=False, bandwidth=10 * 1024 * 1024
                                         print("No data sent, breaking loop.")
                                         break
                                     stats.add_bytes(n)
-                                    print(f"Sent {n} bytes. stats={stats.__dict__}")
-                                    stats.update()
+                                    if DEBUG:
+                                        print(f"Sent {n} bytes. stats={stats.__dict__}")
+                                    time.sleep(0.005)  # 기존 0.01초에서 0.005초로 줄임
                                 except socket.error as e:
                                     if (
                                         e.errno != 11
@@ -228,8 +270,8 @@ def client(host, port=5201, udp=False, reverse=False, bandwidth=10 * 1024 * 1024
                                     print("Connection closed by peer.")
                                     break  # Connection closed
                                 stats.add_bytes(n)
-                                print(f"Received {n} bytes. stats={stats.__dict__}")
-                                stats.update()
+                                if DEBUG:
+                                    print(f"Received {n} bytes. stats={stats.__dict__}")
                             except socket.error as e:
                                 if e.errno != 11:  # Resource temporarily unavailable
                                     stats.stop()
@@ -267,15 +309,15 @@ def client(host, port=5201, udp=False, reverse=False, bandwidth=10 * 1024 * 1024
                     except socket.error as e:
                         print(f"Failed to send results: {e}")
                         return
-                    print(f"results={results}")
+                    print(f"Results sent: {results}")
 
                 elif cmd == DISPLAY_RESULTS:
                     try:
                         s_ctrl.sendall(bytes([IPERF_DONE]))
                         s_ctrl.close()
                     except socket.error as e:
-                        print(f"Failed to send IPERF_DONE: {e}")
-                    print("Test completed, connection closed.")
+                        print(f"Failed to close control socket: {e}")
+                    print("Test completed, control socket closed.")
                     time.sleep(1)
                     return
 
@@ -284,7 +326,7 @@ def client(host, port=5201, udp=False, reverse=False, bandwidth=10 * 1024 * 1024
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python client.py <server_ip>")
+        print("Usage: python client.py <server_ip> [port]")
         sys.exit(1)
     if len(sys.argv) >= 3:
         port = int(sys.argv[2])

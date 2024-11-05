@@ -4,6 +4,7 @@ Pure Python, iperf3-compatible network performance test tool.
 MIT license; Copyright (c) 2018-2019 Damien P. George
 
 Supported modes: server & client, TCP & UDP, normal & reverse
+modified to W55RP20: Joseph<joseph@wiznet.io>
 
 Usage:
     import iperf3
@@ -14,22 +15,21 @@ Usage:
 
 import json
 import select
-import socket
 import struct
 import sys
 import time
 from usocket import (
-    socket as uusocket,
+    socket,
     AF_INET,
     SOL_SOCKET,
     SOCK_STREAM,
     SOCK_DGRAM,
     getaddrinfo,
     SO_REUSEADDR,
+    SO_KEEPALIVESEND,
 )
 from machine import Pin, WIZNET_PIO_SPI
 import network
-import _thread
 
 
 # W5x00 chip initialization
@@ -51,7 +51,9 @@ def w5x00_init(ip_info=None):
             try:
                 nic.ifconfig("dhcp")
             except Exception as e:
-                print(f"Attempt {i + 1} failed, retrying in {delay} second(s)...({e})")
+                print(
+                    f"Attempt {i + 1} failed, retrying in {delay} second(s)...{type(e)}"
+                )
             time.sleep(delay)
 
     while not nic.isconnected():
@@ -252,8 +254,9 @@ def server_once():
     ai = getaddrinfo("0.0.0.0", 5201)
     ai = ai[0]
     print("Server listening on", ai[-1])
-    s_listen = uusocket(ai[0], SOCK_STREAM)
+    s_listen = socket(ai[0], SOCK_STREAM)
     s_listen.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+    s_listen.setsockopt(SOL_SOCKET, SO_KEEPALIVESEND, 1)  # Keepalive 설정 추가
     s_listen.bind(ai[-1])
     s_listen.listen(1)
     s_ctrl, addr = s_listen.accept()
@@ -261,7 +264,7 @@ def server_once():
     # Read client's cookie
     cookie = recvn(s_ctrl, COOKIE_SIZE)
     if DEBUG:
-        print("cookie=", cookie)
+        print(cookie)
 
     # Ask for parameters
     s_ctrl.sendall(bytes([PARAM_EXCHANGE]))
@@ -271,7 +274,7 @@ def server_once():
     param = recvn(s_ctrl, n)
     param = json.loads(str(param, "ascii"))
     if DEBUG:
-        print("param=", param)
+        print(param)
     reverse = param.get("reverse", False)
 
     # Ask to create streams
@@ -285,7 +288,7 @@ def server_once():
     elif param.get("udp", False):
         # Close TCP connection and open UDP "connection"
         s_listen.close()
-        s_data = uusocket(ai[0], SOCK_DGRAM)
+        s_data = socket(ai[0], SOCK_DGRAM)
         s_data.bind(ai[-1])
         data, addr = s_data.recvfrom(4)
         s_data.sendto(b"\x12\x34\x56\x78", addr)
@@ -308,7 +311,10 @@ def server_once():
     stats = Stats(param)
     stats.start()
     running = True
-    data_buf = bytearray(urandom(param["len"]))
+    # data_buf = bytearray(urandom(param["len"]))
+    data_buf = bytearray(
+        urandom(min(1024, param["len"]))
+    )  # Reduce buffer size to save memory
     while running:
         for pollable in poll.poll(stats.max_dt_ms()):
             if pollable_is_sock(pollable, s_ctrl):
@@ -319,6 +325,7 @@ def server_once():
                 if cmd == TEST_END:
                     running = False
             elif pollable_is_sock(pollable, s_data):
+                time.sleep(0.01)  # Add a small delay to prevent overloading
                 if reverse:
                     n = s_data.send(data_buf)
                     print(f"sent:{data_buf}")
@@ -348,7 +355,7 @@ def server_once():
     results = recvn(s_ctrl, n)
     results = json.loads(str(results, "ascii"))
     if DEBUG:
-        print("results=", results)
+        print(results)
 
     # Send our results
     results = {
@@ -394,193 +401,12 @@ def server():
             print("Starting server function...")
             server_once()
         except Exception as e:
-            print(f"ERROR on running server:{e}")
+            print(f"ERROR on running server:{e}({type(e)})")
+            from sys import print_exception
+
+            print_exception(e)
             print(f"Waiting {_delay} seconds...")
             time.sleep(_delay)
-
-
-def client(host, udp=False, reverse=False, bandwidth=10 * 1024 * 1024):
-    print(
-        "CLIENT MODE:", "UDP" if udp else "TCP", "receiving" if reverse else "sending"
-    )
-
-    param = {
-        "client_version": "3.6",
-        "omit": 0,
-        "parallel": 1,
-        "pacing_timer": 1000,
-        "time": 10,
-    }
-
-    if udp:
-        param["udp"] = True
-        param["len"] = 1500 - 42
-        param["bandwidth"] = (
-            bandwidth  # this should be should be intended bits per second
-        )
-        udp_interval = 1000000 * 8 * param["len"] // param["bandwidth"]
-    else:
-        param["tcp"] = True
-        param["len"] = 3000
-
-    if reverse:
-        param["reverse"] = True
-
-    # Connect to server
-    ai = getaddrinfo(host, 5201)[0]
-    print("Connecting to", ai[-1])
-    s_ctrl = socket(ai[0], SOCK_STREAM)
-    s_ctrl.connect(ai[-1])
-
-    # Send our cookie
-    cookie = make_cookie()
-    if DEBUG:
-        print("made cookie=", cookie)
-    s_ctrl.sendall(cookie)
-
-    # Object to gather statistics about the run
-    stats = Stats(param)
-
-    # Run the main loop, waiting for incoming commands and dat
-    ticks_us_end = param["time"] * 1000000
-    poll = select.poll()
-    poll.register(s_ctrl, select.POLLIN)
-    buf = None
-    s_data = None
-    start = None
-    udp_packet_id = 0
-    udp_last_send = None
-    while True:
-        for pollable in poll.poll(stats.max_dt_ms()):
-            if pollable_is_sock(pollable, s_data):
-                # Data socket is writable/readable
-                t = ticks_us()
-                if ticks_diff(t, start) > ticks_us_end:
-                    if reverse:
-                        # Continue to drain any incoming data
-                        recvinto(s_data, buf)
-                    if stats.running:
-                        # End of run
-                        s_ctrl.sendall(bytes([TEST_END]))
-                        stats.stop()
-                else:
-                    # Send/receiver data
-                    if udp:
-                        if reverse:
-                            recvninto(s_data, buf)
-                            udp_in_sec, udp_in_usec, udp_in_id = struct.unpack_from(
-                                ">III", buf, 0
-                            )
-                            print(
-                                "udp_in_sec, udp_in_usec, udp_in_id=",
-                                udp_in_sec,
-                                udp_in_usec,
-                                udp_in_id,
-                            )
-                            if udp_in_id != udp_packet_id + 1:
-                                stats.add_lost_packets(udp_in_id - (udp_packet_id + 1))
-                            udp_packet_id = udp_in_id
-                            stats.add_bytes(len(buf))
-                        else:
-                            print("UDP send=", udp_last_send, t, udp_interval)
-                            if t - udp_last_send > udp_interval:
-                                udp_last_send += udp_interval
-                                udp_packet_id += 1
-                                struct.pack_into(
-                                    ">III",
-                                    buf,
-                                    0,
-                                    t // 1000000,
-                                    t % 1000000,
-                                    udp_packet_id,
-                                )
-                                n = s_data.sendto(buf, ai[-1])
-                                stats.add_bytes(n)
-                    else:
-                        if reverse:
-                            recvninto(s_data, buf)
-                            n = len(buf)
-                        else:
-                            print("TCP send", len(buf))
-                            n = s_data.send(buf)
-                        stats.add_bytes(n)
-
-            elif pollable_is_sock(pollable, s_ctrl):
-                # Receive command
-                cmd = recvn(s_ctrl, 1)[0]
-                if DEBUG:
-                    print(cmd_string.get(cmd, "UNKNOWN_COMMAND"))
-                if cmd == TEST_START:
-                    if reverse:
-                        # Start receiving data now, because data socket is open
-                        poll.register(s_data, select.POLLIN)
-                        start = ticks_us()
-                        stats.start()
-                elif cmd == TEST_RUNNING:
-                    if not reverse:
-                        # Start sending data now
-                        poll.register(s_data, select.POLLOUT)
-                        start = ticks_us()
-                        if udp:
-                            udp_last_send = start - udp_interval
-                        stats.start()
-                elif cmd == PARAM_EXCHANGE:
-                    param_j = json.dumps(param)
-                    s_ctrl.sendall(struct.pack(">I", len(param_j)))
-                    s_ctrl.sendall(bytes(param_j, "ascii"))
-                elif cmd == CREATE_STREAMS:
-                    if udp:
-                        socket(ai[0], SOCK_DGRAM)
-                        s_data.sendto(struct.pack("<I", 123456789), ai[-1])
-                        recvn(s_data, 4)  # get dummy response from server (=987654321)
-                    else:
-                        s_data = socket(ai[0], SOCK_STREAM)
-                        s_data.connect(ai[-1])
-                        s_data.sendall(cookie)
-                    buf = bytearray(urandom(param["len"]))
-                elif cmd == EXCHANGE_RESULTS:
-                    # Close data socket now that server knows we are finished, to prevent it flooding us
-                    poll.unregister(s_data)
-                    s_data.close()
-                    s_data = None
-
-                    results = {
-                        "cpu_util_total": 1,
-                        "cpu_util_user": 0.5,
-                        "cpu_util_system": 0.5,
-                        "sender_has_retransmits": 1,
-                        "congestion_used": "cubic",
-                        "streams": [
-                            {
-                                "id": 1,
-                                "bytes": stats.nb0,
-                                "retransmits": 0,
-                                "jitter": 0,
-                                "errors": stats.nm0,
-                                "packets": stats.np0,
-                                "start_time": 0,
-                                "end_time": ticks_diff(stats.t3, stats.t0) * 1e-6,
-                            }
-                        ],
-                    }
-                    results = json.dumps(results)
-                    s_ctrl.sendall(struct.pack(">I", len(results)))
-                    s_ctrl.sendall(bytes(results, "ascii"))
-
-                    n = struct.unpack(">I", recvn(s_ctrl, 4))[0]
-                    results = recvn(s_ctrl, n)
-                    results = json.loads(str(results, "ascii"))
-                    stats.report_receiver(results)
-
-                elif cmd == DISPLAY_RESULTS:
-                    s_ctrl.sendall(bytes([IPERF_DONE]))
-                    s_ctrl.close()
-                    time.sleep(
-                        1
-                    )  # delay so server is ready for any subsequent client connections
-                    return
-
-        stats.update()
 
 
 def main():
@@ -606,8 +432,6 @@ def main():
 
     if opt_mode == "-s":
         server()
-    else:
-        client(opt_host, opt_udp, opt_reverse)
 
 
 if sys.platform == "linux":
@@ -634,4 +458,3 @@ else:
     server()
     # _thread.start_new_thread(server, ())
     time.sleep(1)
-    # client(nic.ifconfig()[0], False, False)
