@@ -23,3 +23,11 @@ user.props
 
 # MacOS desktop metadata files
 .DS_Store
+
+# vscode related
+.history/
+.vscode/
+
+# vim temporary files
+.*.sw[a-p]
+*~
