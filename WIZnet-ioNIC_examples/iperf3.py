@@ -26,7 +26,7 @@ from usocket import (
     SOCK_DGRAM,
     getaddrinfo,
     SO_REUSEADDR,
-    SO_KEEPALIVESEND,
+    # SO_KEEPALIVESEND,
 )
 from machine import Pin, WIZNET_PIO_SPI
 import network
@@ -256,7 +256,7 @@ def server_once():
     print("Server listening on", ai[-1])
     s_listen = socket(ai[0], SOCK_STREAM)
     s_listen.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
-    s_listen.setsockopt(SOL_SOCKET, SO_KEEPALIVESEND, 1)  # Keepalive 설정 추가
+    # s_listen.setsockopt(SOL_SOCKET, SO_KEEPALIVESEND, 1)  # Keepalive 설정 추가. 동작 안함..
     s_listen.bind(ai[-1])
     s_listen.listen(1)
     s_ctrl, addr = s_listen.accept()
