@@ -9,12 +9,12 @@
 #define MICROPY_PY_NETWORK_HOSTNAME_DEFAULT "W55RP20-EVB"
 
 // Wiznet HW config.
-#define MICROPY_HW_WIZNET_PIO_SPI_ID            (0)
-#define MICROPY_HW_WIZNET_PIO_SPI_BAUDRATE      (20 * 1000 * 1000)
-#define MICROPY_HW_WIZNET_PIO_SPI_SCK           (21)
-#define MICROPY_HW_WIZNET_PIO_SPI_MOSI          (23)
-#define MICROPY_HW_WIZNET_PIO_SPI_MISO          (22)
-#define MICROPY_HW_WIZNET_PIO_PIN_CS            (20)
-#define MICROPY_HW_WIZNET_PIO_PIN_RST           (24)
+#define MICROPY_HW_WIZNET_PIO_SPI_ID        (0)
+#define MICROPY_HW_WIZNET_PIO_SPI_BAUDRATE  (20 * 1000 * 1000)
+#define MICROPY_HW_WIZNET_PIO_SPI_SCK       (21)
+#define MICROPY_HW_WIZNET_PIO_SPI_MOSI      (23)
+#define MICROPY_HW_WIZNET_PIO_SPI_MISO      (22)
+#define MICROPY_HW_WIZNET_PIO_PIN_CS        (20)
+#define MICROPY_HW_WIZNET_PIO_PIN_RST       (24)
 // Connecting the INTN pin enables RECV interrupt handling of incoming data.
 #define MICROPY_HW_WIZNET_PIN_INTN          (21)
