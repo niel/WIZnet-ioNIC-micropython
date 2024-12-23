@@ -75,14 +75,14 @@ static void wiznet_pio_spi_gpio_setup(wiznet_pio_spi_state_t *state) {
 
 wiznet_pio_spi_handle_t wiznet_pio_spi_open(const wiznet_pio_spi_config_t *wiznet_pio_spi_config) {
     wiznet_pio_spi_state_t *state;
-    for(int i = 0; i < count_of(wiznet_pio_spi_state); i++) {
+    for (int i = 0; i < count_of(wiznet_pio_spi_state); i++) {
         if (!wiznet_pio_spi_state[i].funcs) {
             state = &wiznet_pio_spi_state[i];
             break;
         }
     }
     assert(state);
-    //if (!state) return NULL;
+    // if (!state) return NULL;
     state->spi_config = wiznet_pio_spi_config;
     state->funcs = get_wiznet_pio_spi_impl();
 
@@ -115,14 +115,14 @@ wiznet_pio_spi_handle_t wiznet_pio_spi_open(const wiznet_pio_spi_config_t *wizne
     pio_sm_config sm_config = WIZNET_PIO_SPI_PROGRAM_GET_DEFAULT_CONFIG_FUNC(state->pio_offset);
 
     sm_config_set_clkdiv_int_frac(&sm_config, state->spi_config->clock_div_major, state->spi_config->clock_div_minor);
-    hw_write_masked(&padsbank0_hw->io[state->spi_config->clock_pin],
-                    (uint)PADS_DRIVE_STRENGTH << PADS_BANK0_GPIO0_DRIVE_LSB,
-                    PADS_BANK0_GPIO0_DRIVE_BITS
-    );
-    hw_write_masked(&padsbank0_hw->io[state->spi_config->clock_pin],
-                    (uint)1 << PADS_BANK0_GPIO0_SLEWFAST_LSB,
-                    PADS_BANK0_GPIO0_SLEWFAST_BITS
-    );
+    hw_write_masked(&pads_bank0_hw->io[state->spi_config->clock_pin],
+        (uint)PADS_DRIVE_STRENGTH << PADS_BANK0_GPIO0_DRIVE_LSB,
+            PADS_BANK0_GPIO0_DRIVE_BITS
+        );
+    hw_write_masked(&pads_bank0_hw->io[state->spi_config->clock_pin],
+        (uint)1 << PADS_BANK0_GPIO0_SLEWFAST_LSB,
+            PADS_BANK0_GPIO0_SLEWFAST_BITS
+        );
 
     sm_config_set_out_pins(&sm_config, state->spi_config->data_out_pin, 1);
     sm_config_set_in_pins(&sm_config, state->spi_config->data_in_pin);
@@ -143,9 +143,8 @@ wiznet_pio_spi_handle_t wiznet_pio_spi_open(const wiznet_pio_spi_config_t *wizne
     gpio_set_input_hysteresis_enabled(state->spi_config->data_in_pin, true);
 
     pio_sm_exec(state->pio, state->pio_sm, pio_encode_set(pio_pins, 1));
-
-    state->dma_out = (int8_t) dma_claim_unused_channel(false); // todo: Should be able to use one dma channel?
-    state->dma_in = (int8_t) dma_claim_unused_channel(false);
+    state->dma_out = (int8_t)dma_claim_unused_channel(false); // todo: Should be able to use one dma channel?
+    state->dma_in = (int8_t)dma_claim_unused_channel(false);
     if (state->dma_out < 0 || state->dma_in < 0) {
         wiznet_pio_spi_close(&state->funcs);
         return NULL;
@@ -157,8 +156,9 @@ void wiznet_pio_spi_close(wiznet_pio_spi_handle_t handle) {
     wiznet_pio_spi_state_t *state = (wiznet_pio_spi_state_t *)handle;
     if (state) {
         if (state->pio_sm >= 0) {
-            if (state->pio_offset != -1)
+            if (state->pio_offset != -1) {
                 pio_remove_program(state->pio, &WIZNET_PIO_SPI_PROGRAM_FUNC, state->pio_offset);
+            }
 
             pio_sm_unclaim(state->pio, state->pio_sm);
         }
@@ -202,9 +202,9 @@ static void wiznet_pio_spi_frame_end(void) {
     cs_set(active_state, true);
 
     // we need to wait a bit in case the irq line is incorrectly high
-#ifdef IRQ_SAMPLE_DELAY_NS
+    #ifdef IRQ_SAMPLE_DELAY_NS
     ns_delay(IRQ_SAMPLE_DELAY_NS);
-#endif
+    #endif
 }
 
 // send tx then receive rx
@@ -219,7 +219,7 @@ bool wiznet_pio_spi_transfer(const uint8_t *tx, size_t tx_length, uint8_t *rx, s
         assert(tx && tx_length && rx_length);
 
         pio_sm_set_enabled(state->pio, state->pio_sm, false); // disable sm
-        pio_sm_set_wrap(state->pio, state->pio_sm, state->pio_offset + WIZNET_PIO_SPI_OFFSET_WRITE_BITS, state->pio_offset + WIZNET_PIO_SPI_OFFSET_READ_END - 1); 
+        pio_sm_set_wrap(state->pio, state->pio_sm, state->pio_offset + WIZNET_PIO_SPI_OFFSET_WRITE_BITS, state->pio_offset + WIZNET_PIO_SPI_OFFSET_READ_END - 1);
         pio_sm_clear_fifos(state->pio, state->pio_sm); // clear fifos from previous run
         pio_sm_set_pindirs_with_mask(state->pio, state->pio_sm, 1u << state->spi_config->data_out_pin, 1u << state->spi_config->data_out_pin);
         pio_sm_restart(state->pio, state->pio_sm);
@@ -293,7 +293,7 @@ bool wiznet_pio_spi_transfer(const uint8_t *tx, size_t tx_length, uint8_t *rx, s
 
 // To read a byte we must first have been asked to write a 3 byte spi header
 static uint8_t wiznet_pio_spi_read_byte(void) {
-    assert(active_state);    
+    assert(active_state);
     assert(active_state->spi_header_count == WIZNET_PIO_SPI_HEADER_LEN);
     uint8_t ret;
     if (!wiznet_pio_spi_transfer(active_state->spi_header, active_state->spi_header_count, &ret, 1)) {
@@ -309,8 +309,7 @@ static void wiznet_pio_spi_write_byte(uint8_t wb) {
 }
 
 // To read a buffer we must first have been asked to write a 3 byte spi header
-void wiznet_pio_spi_read_buffer(uint8_t* pBuf, uint16_t len) {
-
+void wiznet_pio_spi_read_buffer(uint8_t *pBuf, uint16_t len) {
     assert(active_state);
     assert(active_state->spi_header_count == WIZNET_PIO_SPI_HEADER_LEN);
     if (!wiznet_pio_spi_transfer(active_state->spi_header, active_state->spi_header_count, pBuf, len)) {
@@ -322,7 +321,7 @@ void wiznet_pio_spi_read_buffer(uint8_t* pBuf, uint16_t len) {
 // If we have been asked to write a spi header already, then write it and the rest of the buffer
 // or else if we've been given enough data for just the spi header, save it until the next call
 // or we're writing a byte in which case we're given a buffer including the spi header
-void wiznet_pio_spi_write_buffer(const uint8_t* pBuf, uint16_t len) {
+void wiznet_pio_spi_write_buffer(const uint8_t *pBuf, uint16_t len) {
     assert(active_state);
     if (len == WIZNET_PIO_SPI_HEADER_LEN && active_state->spi_header_count == 0) {
         memcpy(active_state->spi_header, pBuf, WIZNET_PIO_SPI_HEADER_LEN); // expect another call

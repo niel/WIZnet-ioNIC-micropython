@@ -75,8 +75,9 @@ static mp_obj_t machine_wiznet_pio_spi_make_new(const mp_obj_type_t *type, size_
     uint32_t clock = clock_get_hz(clk_sys);
     uint32_t clock_div = clock / args[ARG_baudrate].u_int;
 
-    if(clock_div > clock / 4)
-      clock_div = clock / 4;
+    if (clock_div > clock / 4) {
+        clock_div = clock / 4;
+    }
 
     wiznet_pio_spi_config.clock_div_major = clock_div;
     wiznet_pio_spi_config.clock_div_minor = 0;
@@ -84,8 +85,9 @@ static mp_obj_t machine_wiznet_pio_spi_make_new(const mp_obj_type_t *type, size_
     wiznet_pio_spi_config.data_out_pin = self->spi.mosi;
     wiznet_pio_spi_config.clock_pin = self->spi.sck;
 
-    if (wiznet_pio_spi_handle != NULL)
+    if (wiznet_pio_spi_handle != NULL) {
         wiznet_pio_spi_close(wiznet_pio_spi_handle);
+    }
     wiznet_pio_spi_handle = wiznet_pio_spi_open(&wiznet_pio_spi_config);
     (*wiznet_pio_spi_handle)->set_active(wiznet_pio_spi_handle);
 
@@ -117,26 +119,29 @@ static void machine_wiznet_pio_spi_init(mp_obj_base_t *self_in, size_t n_args, c
     uint32_t clock = clock_get_hz(clk_sys);
     uint32_t clock_div = clock / args[ARG_baudrate].u_int;
 
-    if(clock_div > clock / 4)
-      clock_div = clock / 4;
-    
+    if (clock_div > clock / 4) {
+        clock_div = clock / 4;
+    }
+
     wiznet_pio_spi_config.clock_div_major = clock_div;
     wiznet_pio_spi_config.clock_div_minor = 0;
     wiznet_pio_spi_config.data_in_pin = self->spi.miso;
     wiznet_pio_spi_config.data_out_pin = self->spi.mosi;
     wiznet_pio_spi_config.clock_pin = self->spi.sck;
 
-    if (wiznet_pio_spi_handle != NULL)
+    if (wiznet_pio_spi_handle != NULL) {
         wiznet_pio_spi_close(wiznet_pio_spi_handle);
+    }
     wiznet_pio_spi_handle = wiznet_pio_spi_open(&wiznet_pio_spi_config);
     (*wiznet_pio_spi_handle)->set_active(wiznet_pio_spi_handle);
 }
 
 static void machine_wiznet_pio_spi_transfer(mp_obj_base_t *self_in, size_t len, const uint8_t *src, uint8_t *dest) {
-    if(dest == NULL)
-      wiznet_pio_spi_write_buffer(src, len);
-    else
-      wiznet_pio_spi_read_buffer(dest, len);
+    if (dest == NULL) {
+        wiznet_pio_spi_write_buffer(src, len);
+    } else {
+        wiznet_pio_spi_read_buffer(dest, len);
+    }
 }
 
 const mp_machine_spi_p_t machine_wiznet_pio_spi_p = {
@@ -154,4 +159,3 @@ MP_DEFINE_CONST_OBJ_TYPE(
     protocol, &machine_wiznet_pio_spi_p,
     locals_dict, &mp_machine_spi_locals_dict
     );
-

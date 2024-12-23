@@ -19,7 +19,7 @@ typedef struct wiznet_pio_spi_config {
     uint8_t spi_hw_instance;
 } wiznet_pio_spi_config_t;
 
-typedef struct wiznet_pio_spi_funcs** wiznet_pio_spi_handle_t;
+typedef struct wiznet_pio_spi_funcs **wiznet_pio_spi_handle_t;
 
 typedef struct wiznet_pio_spi_funcs {
     void (*close)(wiznet_pio_spi_handle_t funcs);
@@ -37,8 +37,7 @@ typedef struct wiznet_pio_spi_funcs {
 wiznet_pio_spi_handle_t wiznet_pio_spi_open(const wiznet_pio_spi_config_t *pio_spi_config);
 void wiznet_pio_spi_close(wiznet_pio_spi_handle_t handle);
 bool wiznet_pio_spi_transfer(const uint8_t *tx, size_t tx_length, uint8_t *rx, size_t rx_length);
-void wiznet_pio_spi_read_buffer(uint8_t* pBuf, uint16_t len);
-void wiznet_pio_spi_write_buffer(const uint8_t* pBuf, uint16_t len);
-
+void wiznet_pio_spi_read_buffer(uint8_t *pBuf, uint16_t len);
+void wiznet_pio_spi_write_buffer(const uint8_t *pBuf, uint16_t len);
 
 #endif
